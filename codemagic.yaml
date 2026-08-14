@@ -1,0 +1,83 @@
+# Codemagic CI config — builds a real, installable iOS build on a hosted Mac,
+# triggered from this Windows machine. Nothing here runs locally.
+#
+# One-time manual setup in the Codemagic dashboard (codemagic.io), none of
+# which can be done from this file or by an assistant on your behalf:
+#   1. Sign up at codemagic.io (free tier: 500 build minutes/month) and
+#      connect this repo (push it to GitHub/GitLab/Bitbucket first).
+#   2. Enroll in the Apple Developer Program ($99/yr, developer.apple.com)
+#      if you haven't. Required for any real device install or TestFlight.
+#   3. In Codemagic: Teams > Integrations > Apple Developer Portal, add an
+#      App Store Connect API key (generated in appstoreconnect.apple.com >
+#      Users and Access > Keys). This lets Codemagic sign builds and upload
+#      to TestFlight without you touching Xcode.
+#   4. Create the app's bundle identifier (e.g. com.yourname.convoyapp) in
+#      App Store Connect, matching PRODUCT_BUNDLE_IDENTIFIER below.
+#   5. Push to the branch this workflow triggers on (main) to kick off a build.
+#
+# Until step 3 is done, the build will still compile and archive — it just
+# won't be able to sign/upload. That's still useful for catching build
+# errors without owning a Mac.
+
+workflows:
+  ios-workflow:
+    name: Convoy iOS
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic_appstore_integration # rename to match your Codemagic integration name
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.convoyapp
+      vars:
+        XCODE_WORKSPACE: "ios/ConvoyApp.xcworkspace"
+        XCODE_SCHEME: "ConvoyApp"
+      node: 22.11.0
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+      - name: Install CocoaPods dependencies
+        script: cd ios && pod install
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-workflow:
+    name: Convoy Android
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      node: 22.11.0
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+      - name: Build debug APK
+        script: cd android && ./gradlew assembleDebug
+    artifacts:
+      - android/app/build/outputs/**/*.apk
